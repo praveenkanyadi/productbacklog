@@ -1,0 +1,21 @@
+{
+  "name": "edm-agent-app",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev -w apps/web",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:worker": "npm run dev -w apps/worker",
+    "build": "npm run build -w packages/shared && npm run build -w apps/web && npm run build -w apps/api && npm run build -w apps/worker",
+    "build:shared": "npm run build -w packages/shared",
+    "db:push": "npm run db:push -w packages/shared",
+    "db:seed": "npm run db:seed -w packages/shared",
+    "demo:reset": "npm run demo:reset -w packages/shared"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

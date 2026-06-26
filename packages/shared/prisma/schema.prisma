@@ -1,0 +1,528 @@
+// Extra Duty Management (EDM) - Prisma Schema
+// Source: docs/edm-spec.md
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum AssignmentStatus {
+  DRAFT
+  PUBLISHED
+  OPEN
+  FILLED
+  CLOSED
+  COMPLETED
+  CANCELED
+}
+
+enum RequestStatus {
+  DRAFT
+  SUBMITTED
+  INELIGIBLE
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  WITHDRAWN
+  CANCELED
+  COMPLETED
+}
+
+enum ApprovalStepStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  DELEGATED
+  SKIPPED
+  TIMED_OUT
+}
+
+enum PayType {
+  HOURLY
+  FLAT_RATE
+  OVERTIME
+  OTHER
+}
+
+enum RequestType {
+  EXTRA_DUTY
+  COVERAGE
+  OTHER
+}
+
+// =============================================================================
+// Models
+// =============================================================================
+
+model User {
+  id        String   @id @default(cuid())
+  orgId     String
+  email     String
+  name      String
+  externalId String? // Auth provider ID
+
+  // Relations
+  assignmentsCreated    Assignment[]         @relation("AssignmentCreator")
+  employeeRequests      EmployeeRequest[]
+  eligibilityEvaluations EligibilityEvaluation[]
+  notificationLogs     NotificationLog[]
+  workedRecords        WorkedRecord[]
+  auditEvents          AuditEvent[]         @relation("AuditEventActor")
+
+  // Backlog relations
+  backlogItemsOwned      BacklogItem[]     @relation("BacklogItemOwner")
+  backlogItemsCreated    BacklogItem[]     @relation("BacklogItemCreator")
+  backlogItemsEngReview  BacklogItem[]     @relation("BacklogItemEngReviewer")
+  backlogRanksPublished  BacklogItem[]     @relation("BacklogItemRankPublisher")
+  backlogActivities      BacklogActivity[] @relation("BacklogActivityActor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([orgId, email])
+}
+
+model Assignment {
+  id          String            @id @default(cuid())
+  orgId       String
+  createdById String
+  status      AssignmentStatus  @default(DRAFT)
+
+  title       String
+  description String?
+  scheduledAt DateTime
+  location    String?
+
+  payType   PayType
+  payAmount Decimal @db.Decimal(10, 2)
+
+  // Temporal workflow (AssignmentWorkflow)
+  workflowId String?
+  runId      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdBy          User                   @relation("AssignmentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  qualifications     AssignmentQualification[]
+  employeeRequests   EmployeeRequest[]
+  workedRecords      WorkedRecord[]
+
+  @@index([orgId])
+  @@index([orgId, status])
+  @@index([scheduledAt])
+}
+
+model AssignmentQualification {
+  id           String   @id @default(cuid())
+  orgId        String
+  assignmentId String
+
+  qualificationType String  // e.g. "certification", "rank", "department"
+  qualificationValue String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@index([assignmentId])
+  @@index([orgId])
+}
+
+model EmployeeRequest {
+  id           String       @id @default(cuid())
+  orgId        String
+  employeeId   String
+  assignmentId String
+  requestType  RequestType  @default(EXTRA_DUTY)
+  status       RequestStatus @default(DRAFT)
+
+  note String?
+
+  // Temporal workflow (RequestWorkflow)
+  workflowId String?
+  runId      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employee   User              @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  assignment Assignment        @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  approvalInstance ApprovalInstance?
+  eligibilityEvaluations EligibilityEvaluation[]
+  workedRecord      WorkedRecord?
+
+  @@index([orgId])
+  @@index([orgId, status])
+  @@index([assignmentId, employeeId])
+  @@index([employeeId])
+}
+
+model ApprovalWorkflowTemplate {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stepTemplates ApprovalStepTemplate[]
+  instances     ApprovalInstance[]
+}
+
+model ApprovalStepTemplate {
+  id         String   @id @default(cuid())
+  templateId String
+  stepOrder  Int
+
+  approverRole   String?  // e.g. "manager", "director"
+  approverConfig Json?    // Criteria for approver selection
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  template ApprovalWorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+
+model ApprovalInstance {
+  id         String   @id @default(cuid())
+  orgId      String
+  requestId  String   @unique
+  templateId String
+
+  // Current step tracking
+  currentStepOrder Int      @default(0)
+  currentStepStatus ApprovalStepStatus @default(PENDING)
+
+  // Step history: [{ stepOrder, status, approverId?, completedAt?, note? }]
+  stepsHistory Json?
+
+  // Temporal workflow (ApprovalWorkflow)
+  workflowId String?
+  runId      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  request  EmployeeRequest           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  template ApprovalWorkflowTemplate   @relation(fields: [templateId], references: [id], onDelete: Restrict)
+}
+
+model EligibilityEvaluation {
+  id         String   @id @default(cuid())
+  orgId      String
+  requestId  String
+  userId     String
+
+  eligible Boolean
+  reason    String?
+
+  createdAt DateTime @default(now())
+
+  request EmployeeRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([requestId])
+  @@index([orgId])
+}
+
+model NotificationLog {
+  id     String   @id @default(cuid())
+  orgId  String
+  userId String
+
+  type    String   // e.g. "approval_request", "reminder"
+  channel String   // "email", "sms"
+  status  String   // "sent", "failed", "pending"
+
+  requestId    String?
+  assignmentId String?
+  summary      String?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([orgId])
+  @@index([createdAt])
+}
+
+model WorkedRecord {
+  id           String   @id @default(cuid())
+  orgId        String
+  userId       String
+  assignmentId String
+  requestId    String?  @unique // Null if filled directly without request
+
+  hours    Decimal  @db.Decimal(5, 2)
+  payAmount Decimal @db.Decimal(10, 2)
+  workedAt DateTime
+
+  exportedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assignment Assignment  @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  request    EmployeeRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([userId])
+  @@index([assignmentId])
+  @@index([workedAt])
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  orgId      String
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+
+  changes Json?
+
+  createdAt DateTime @default(now())
+
+  actor User? @relation("AuditEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// =============================================================================
+// AI Product Backlog
+// =============================================================================
+
+model BacklogPortfolio {
+  id        String   @id @default(cuid())
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products BacklogProduct[]
+}
+
+model BacklogProduct {
+  id          String   @id @default(cuid())
+  portfolioId String
+  name        String
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  portfolio    BacklogPortfolio    @relation(fields: [portfolioId], references: [id], onDelete: Restrict)
+  productAreas BacklogProductArea[]
+  items        BacklogItem[]
+
+  @@index([portfolioId])
+}
+
+model BacklogProductArea {
+  id        String   @id @default(cuid())
+  productId String
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product BacklogProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+  items   BacklogItem[]
+
+  @@index([productId])
+}
+
+model StrategicInitiative {
+  id        String   @id @default(cuid())
+  name      String
+  color     String?
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  itemLinks BacklogItemInitiative[]
+}
+
+model BacklogStatus {
+  id        String   @id @default(cuid())
+  name      String
+  color     String?
+  sortOrder Int      @default(0)
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items BacklogItem[]
+}
+
+model BacklogSource {
+  id        String   @id @default(cuid())
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items BacklogItem[]
+}
+
+model BacklogTargetRelease {
+  id        String   @id @default(cuid())
+  name      String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items BacklogItem[]
+}
+
+model BacklogItem {
+  id            String  @id @default(cuid())
+
+  // General
+  title         String
+  description   String?
+  productId     String
+  productAreaId String?
+  statusId      String
+  sourceId      String?
+  ownerId       String?
+  createdById   String?
+
+  // Customer Impact
+  customersImpacted    Int?
+  arrRepresented       Decimal? @db.Decimal(14, 2)
+  opportunitiesBlocked Int?
+  churnRisk            String?
+  customerSegment      String?
+  vertical             String?
+  customerQuotes       Json?
+  supportingEvidence   String?
+
+  // Business Impact
+  revenueOpportunity      Decimal? @db.Decimal(14, 2)
+  crossSellOpportunity    String?
+  retentionImpact         String?
+  isComplianceRequirement Boolean  @default(false)
+  isCompetitiveGap        Boolean  @default(false)
+  customerSatisfaction    String?
+  strategicNotes          String?
+
+  // Product Assessment
+  problemStatement       String?
+  discoveryStatus        String?
+  assumptions            String?
+  successMetrics         String?
+  alternativesConsidered String?
+  productNotes           String?
+
+  // Engineering Assessment
+  estimatedEffort       String?
+  complexity            String?
+  timelineEstimate      String?
+  technicalDependencies String?
+  risks                 String?
+  architectureNotes     String?
+  confidenceLevel       String?
+  engReviewedById       String?
+  engReviewedAt         DateTime?
+
+  // Planning
+  priorityScore       Int?
+  targetReleaseId     String?
+  roadmapQuarter      String?
+  businessPriority    Int?
+  engineeringPriority Int?
+  rankPublishedAt     DateTime?
+  rankPublishedById   String?
+
+  // Jira
+  jiraIssueKey  String?
+  jiraUrl       String?
+  jiraCreatedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product         BacklogProduct        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productArea     BacklogProductArea?   @relation(fields: [productAreaId], references: [id], onDelete: SetNull)
+  status          BacklogStatus         @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  source          BacklogSource?        @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  targetRelease   BacklogTargetRelease? @relation(fields: [targetReleaseId], references: [id], onDelete: SetNull)
+  owner           User?                 @relation("BacklogItemOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy       User?                 @relation("BacklogItemCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  engReviewedBy   User?                 @relation("BacklogItemEngReviewer", fields: [engReviewedById], references: [id], onDelete: SetNull)
+  rankPublishedBy User?                 @relation("BacklogItemRankPublisher", fields: [rankPublishedById], references: [id], onDelete: SetNull)
+
+  initiatives BacklogItemInitiative[]
+  activities  BacklogActivity[]
+
+  @@index([productId])
+  @@index([statusId])
+  @@index([ownerId])
+  @@index([priorityScore])
+  @@index([businessPriority])
+  @@index([createdAt])
+}
+
+model BacklogItemInitiative {
+  id           String @id @default(cuid())
+  itemId       String
+  initiativeId String
+
+  item       BacklogItem         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  initiative StrategicInitiative @relation(fields: [initiativeId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, initiativeId])
+  @@index([itemId])
+}
+
+model BacklogActivity {
+  id         String   @id @default(cuid())
+  itemId     String
+  actorId    String?
+  actorName  String?
+  actorRole  String?
+  changeType String
+  summary    String
+  changes    Json?
+  comment    String?
+  createdAt  DateTime @default(now())
+
+  item  BacklogItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  actor User?       @relation("BacklogActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([itemId])
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+// Key-value config for editable dropdown lists (e.g. discovery statuses, roadmap quarters)
+model BacklogConfig {
+  key       String   @id
+  values    Json     // string[]
+  updatedAt DateTime @updatedAt
+}
