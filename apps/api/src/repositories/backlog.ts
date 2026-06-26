@@ -46,7 +46,8 @@ export const backlogRepository = {
       orderBy = "businessPriority", orderDir = "asc",
     } = filters;
 
-    const where: Parameters<typeof prisma.backlogItem.findMany>[0]["where"] = {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = {};
 
     if (productId) where.productId = productId;
     if (productAreaId) where.productAreaId = productAreaId;
