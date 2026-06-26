@@ -526,7 +526,7 @@ export default function BacklogAdminPage() {
             items={taxonomy.statuses}
             withColor colorOptions={STATUS_COLOR_OPTIONS} colorBadge={STATUS_COLOR_BADGE}
             withDefault placeholder="e.g. In Review"
-            onSave={data => api.backlog.admin.upsertStatus(data as { id?: string; name: string; color?: string; isDefault?: boolean; sortOrder?: number })}
+            onSave={data => api.backlog.admin.upsertStatus(data as { id?: string; name: string; color?: string; isDefault?: boolean; sortOrder?: number }).then(() => {})}
             onDelete={id => api.backlog.admin.deleteStatus(id).then(() => {})}
             onReload={load}
           />
@@ -536,7 +536,7 @@ export default function BacklogAdminPage() {
           <TaxonomyEditor<BacklogSource>
             items={taxonomy.sources}
             placeholder="e.g. Customer Success"
-            onSave={data => api.backlog.admin.upsertSource(data as { id?: string; name: string; sortOrder?: number })}
+            onSave={data => api.backlog.admin.upsertSource(data as { id?: string; name: string; sortOrder?: number }).then(() => {})}
             onDelete={id => api.backlog.admin.deleteSource(id).then(() => {})}
             onReload={load}
           />
@@ -547,7 +547,7 @@ export default function BacklogAdminPage() {
             items={taxonomy.initiatives}
             withColor colorOptions={INITIATIVE_COLOR_OPTIONS} colorBadge={INITIATIVE_COLOR_BADGE}
             placeholder="e.g. Healthcare"
-            onSave={data => api.backlog.admin.upsertInitiative(data as { id?: string; name: string; color?: string; sortOrder?: number })}
+            onSave={data => api.backlog.admin.upsertInitiative(data as { id?: string; name: string; color?: string; sortOrder?: number }).then(() => {})}
             onDelete={id => api.backlog.admin.deleteInitiative(id).then(() => {})}
             onReload={load}
           />
@@ -557,7 +557,7 @@ export default function BacklogAdminPage() {
           <TaxonomyEditor<BacklogRelease>
             items={taxonomy.releases}
             placeholder="e.g. Q4 2026"
-            onSave={data => api.backlog.admin.upsertRelease(data as { id?: string; name: string; sortOrder?: number })}
+            onSave={data => api.backlog.admin.upsertRelease(data as { id?: string; name: string; sortOrder?: number }).then(() => {})}
             onDelete={id => api.backlog.admin.deleteRelease(id).then(() => {})}
             onReload={load}
           />
