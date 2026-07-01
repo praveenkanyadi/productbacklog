@@ -4,7 +4,7 @@ import { auditRepository } from "../repositories/audit.js";
 import { prisma } from "../lib/prisma.js";
 import { getTemporalClient, workflows, signals, TASK_QUEUE } from "../lib/temporal.js";
 import type { CreateRequestInput } from "../schemas/requests.js";
-import type { RequestWorkflowInput } from "worker/types";
+type RequestWorkflowInput = Record<string, unknown>;
 
 /** Step in approval timeline (shaped for API) */
 export interface ApprovalTimelineStep {
